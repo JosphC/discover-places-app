@@ -1,4 +1,4 @@
-# Aplicație TODO - Flask & ReactJS
+# Aplicație Discover Places - Flask & ReactJS
 
 O aplicație full-stack de gestionare a sarcinilor construită cu Flask (backend) și React TypeScript (frontend). Organizați-vă sarcinile, colaborați prin comentarii, gestionați postări cu locații geografice și urmăriți evaluări pe conținut partajat.
 
@@ -332,3 +332,4 @@ npm run test
 ```bash
 npm run build
 ```
+
