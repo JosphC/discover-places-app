@@ -1,0 +1,230 @@
+from flask_jwt_extended import get_jwt_identity
+from flask_smorest import abort
+from sqlalchemy import select
+from sqlalchemy.exc import NoResultFound, SQLAlchemyError
+from flaskr.db import db
+from flaskr.models.post_model import PostModel
+from flaskr.models.user_model import UserModel
+from flaskr.models.tag_model import TagModel
+
+
+class PostController:
+    @staticmethod
+    def get_all():
+        """Get all posts from all users with their tags"""
+        try:
+            posts = db.session.execute(
+                select(PostModel)
+                .join(UserModel, PostModel.user_id == UserModel.id)
+                .order_by(PostModel.created_at.desc())
+            ).scalars().all()
+
+            result = []
+            for post in posts:
+                post_dict = {
+                    "id": post.id,
+                    "title": post.title,
+                    "content": post.content,
+                    "status": post.status.value,
+                    "image": post.image,
+                    "latitude": post.latitude,
+                    "longitude": post.longitude,
+                    "created_at": post.created_at,
+                    "updated_at": post.updated_at,
+                    "user_id": post.user_id,
+                    "username": post.user.username,
+                    "tags": [{"id": tag.id, "name": tag.name} for tag in post.tags]
+                }
+                result.append(post_dict)
+
+            return result
+        except SQLAlchemyError:
+            abort(500, message="Internal server error while fetching all posts")
+
+    @staticmethod
+    def get_all_on_user():
+        """Get posts for the current authenticated user with their tags"""
+        try:
+            user_id = get_jwt_identity()
+
+            posts = db.session.execute(
+                select(PostModel)
+                .where(PostModel.user_id == user_id)
+                .join(UserModel, PostModel.user_id == UserModel.id)
+                .order_by(PostModel.created_at.desc())
+            ).scalars().all()
+
+            result = []
+            for post in posts:
+                post_dict = {
+                    "id": post.id,
+                    "title": post.title,
+                    "content": post.content,
+                    "status": post.status.value,
+                    "image": post.image,
+                    "latitude": post.latitude,
+                    "longitude": post.longitude,
+                    "created_at": post.created_at,
+                    "updated_at": post.updated_at,
+                    "user_id": post.user_id,
+                    "username": post.user.username,
+                    "tags": [{"id": tag.id, "name": tag.name} for tag in post.tags]
+                }
+                result.append(post_dict)
+
+            return result
+        except SQLAlchemyError:
+            abort(500, message="Internal server error while fetching user posts")
+
+    @staticmethod
+    def create(data):
+        try:
+            user_id = get_jwt_identity()
+
+            # Validate required fields
+            if not data.get("title") or not data["title"].strip():
+                abort(400, message="Title is required and cannot be empty")
+
+            if not data.get("content") or not data["content"].strip():
+                abort(400, message="Content is required and cannot be empty")
+
+            if not data.get("status"):
+                abort(400, message="Status is required")
+
+            # Validate title length
+            if len(data["title"]) > 100:
+                abort(400, message="Title must be 100 characters or less")
+
+            # Validate content length
+            if len(data["content"]) > 1000:
+                abort(400, message="Content must be 1000 characters or less")
+
+            # Handle tag_ids (can be single or multiple)
+            tag_ids = data.get("tag_ids", [])
+            print(f"DEBUG CONTROLLER: Received tag_ids: {tag_ids}")
+            print(f"DEBUG CONTROLLER: Full data: {data}")
+
+            if not tag_ids:
+                # Fallback to single tag_id for backwards compatibility
+                tag_id = data.get("tag_id")
+                if tag_id:
+                    tag_ids = [tag_id]
+
+            # Create post without tags first
+            create_data = {
+                "user_id": user_id,
+                "title": data["title"],
+                "content": data["content"],
+                "status": data["status"],
+                "image": data.get("image"),
+                "latitude": data.get("latitude"),
+                "longitude": data.get("longitude"),
+            }
+
+            new_post = PostModel(**create_data)
+            db.session.add(new_post)
+            db.session.flush()  # Flush to get the post ID before adding tags
+
+            # Add tags if provided
+            if tag_ids:
+                print(f"DEBUG CONTROLLER: Looking for tags with IDs: {tag_ids}")
+                tags = db.session.execute(
+                    select(TagModel).where(TagModel.id.in_(tag_ids))
+                ).scalars().all()
+                print(f"DEBUG CONTROLLER: Found {len(tags)} tags: {[tag.name for tag in tags]}")
+                new_post.tags = tags
+                print(f"DEBUG CONTROLLER: Assigned {len(new_post.tags)} tags to post")
+            else:
+                print("DEBUG CONTROLLER: No tag_ids provided!")
+
+            db.session.commit()
+            print(f"DEBUG CONTROLLER: Post created with ID {new_post.id} and {len(new_post.tags)} tags")
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            abort(500, message="Internal server error while creating post")
+
+    @staticmethod
+    def update(data, post_id):
+        try:
+            user_id = get_jwt_identity()
+
+            # Validate required fields
+            if not data.get("title") or not data["title"].strip():
+                abort(400, message="Title is required and cannot be empty")
+
+            if not data.get("content") or not data["content"].strip():
+                abort(400, message="Content is required and cannot be empty")
+
+            if not data.get("status"):
+                abort(400, message="Status is required")
+
+            # Validate title length
+            if len(data["title"]) > 100:
+                abort(400, message="Title must be 100 characters or less")
+
+            # Validate content length
+            if len(data["content"]) > 1000:
+                abort(400, message="Content must be 1000 characters or less")
+
+            post = db.session.execute(
+                select(PostModel).where(
+                    PostModel.id == post_id,
+                    PostModel.user_id == user_id
+                )
+            ).scalar_one()
+
+            post.title = data["title"]
+            post.content = data["content"]
+            post.status = data["status"]
+
+            # Handle tag_ids (can be single or multiple)
+            tag_ids = data.get("tag_ids", [])
+            if not tag_ids:
+                # Fallback to single tag_id for backwards compatibility
+                tag_id = data.get("tag_id")
+                if tag_id:
+                    tag_ids = [tag_id]
+
+            # Update tags if provided
+            if tag_ids:
+                tags = db.session.execute(
+                    select(TagModel).where(TagModel.id.in_(tag_ids))
+                ).scalars().all()
+                post.tags = tags
+
+            if "image" in data:
+                post.image = data["image"]
+
+            if "latitude" in data:
+                post.latitude = data["latitude"]
+
+            if "longitude" in data:
+                post.longitude = data["longitude"]
+
+            db.session.add(post)
+            db.session.commit()
+        except NoResultFound:
+            abort(404, message="Post not found or you don't have permission to edit it")
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            abort(500, message="Internal server error while updating post")
+
+    @staticmethod
+    def delete(post_id):
+        try:
+            user_id = get_jwt_identity()
+
+            post = db.session.execute(
+                select(PostModel).where(
+                    PostModel.id == post_id,
+                    PostModel.user_id == user_id
+                )
+            ).scalar_one()
+
+            db.session.delete(post)
+            db.session.commit()
+        except NoResultFound:
+            abort(404, message="Post not found or you don't have permission to delete it")
+        except SQLAlchemyError:
+            db.session.rollback()
+            abort(500, message="Internal server error while deleting post")
